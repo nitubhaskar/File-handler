@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.FileHandler" parent="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+</resources>

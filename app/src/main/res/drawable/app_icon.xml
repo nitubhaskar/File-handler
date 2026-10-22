@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="128dp"
+    android:height="128dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Background -->
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M0,0h512v512h-512z" />
+
+    <!-- Outer Cyan Border Frame -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M48,24h416c13.3,0 24,10.7 24,24v416c0,13.3 -10.7,24 -24,24h-416c-13.3,0 -24,-10.7 -24,-24v-416c0,-13.3 10.7,-24 24,-24z" />
+
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M52,28h408c11,0 20,9 20,20v408c0,11 -9,20 -20,20h-408c-11,0 -20,-9 -20,-20v-408c0,-11 9,-20 20,-20z" />
+
+    <!-- Left Pane Tile: Emerald Green -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M120,80h120c13.3,0 24,10.7 24,24v180c0,13.3 -10.7,24 -24,24h-120c-13.3,0 -24,-10.7 -24,-24v-180c0,-13.3 10.7,-24 24,-24z" />
+
+    <!-- Left Document Graphic -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M160,150h40c4.4,0 8,3.6 8,8v60c0,4.4 -3.6,8 -8,8h-40c-4.4,0 -8,-3.6 -8,-8v-60c0,-4.4 3.6,-8 8,-8z" />
+
+    <!-- Right Pane Tile: Sky Blue -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M272,80h120c13.3,0 24,10.7 24,24v180c0,13.3 -10.7,24 -24,24h-120c-13.3,0 -24,-10.7 -24,-24v-180c0,-13.3 10.7,-24 24,-24z" />
+
+    <!-- Right Folder Graphic -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M304,160h30l10,10h40c4.4,0 8,3.6 8,8v40c0,4.4 -3.6,8 -8,8h-80c-4.4,0 -8,-3.6 -8,-8v-50c0,-4.4 3.6,-8 8,-8z" />
+
+    <!-- Bottom Name Accent Bar: Electric Cyan -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M96,350h320c8.8,0 16,7.2 16,16v50c0,8.8 -7.2,16 -16,16h-320c-8.8,0 -16,-7.2 -16,-16v-50c0,-8.8 7.2,-16 16,-16z" />
+
+    <!-- Dark Text cutout: FILEHANDLER -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M120,370h12v30h-12z M120,370h28v8h-28z M120,381h20v8h-20z M160,370h12v30h-12z M180,370h12v22h18v8h-30z M218,370h28v8h-28z M218,381h20v8h-20z M218,392h28v8h-28z M254,370h12v30h-12z M274,370h12v30h-12z M294,370h12v30h-12z M314,370h28v8h-28z M314,381h20v8h-20z M314,392h28v8h-28z M350,370h28v8h-28z M350,381h20v8h-20z" />
+
+</vector>
