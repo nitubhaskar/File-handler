@@ -20,6 +20,10 @@
   - Directory actions menu (Info, Delete, Confirmation safety dialogs).
   - Categorized media icons for Folders, Videos, Images, Audio, and Documents.
 
+- **🔌 Storage Source Switcher (USB & SD Card Support):**
+  - Detects and allows switching between **Internal Storage** (`/storage/emulated/0`), connected **SD Cards**, and **USB Flash Drives** (`/storage/XXXX-XXXX`).
+  - Displays storage capacity statistics (Free space vs. Total space) with an active volume indicator.
+
 - **🔒 Android 11 Storage Management (`MANAGE_EXTERNAL_STORAGE`):**
   - Seamless handling of Android 11+ All Files Access permissions with dedicated TV prompt screens.
 
@@ -31,7 +35,6 @@
 - **🎮 Smart TV Remote Navigation & Controls:**
   - **Smart Back Button Handling:** Navigates up folder levels when inside sub-directories, closes open modal dialogs, and prompts *"Press Back again to exit"* at the root folder.
   - **Automatic Focus Trapping:** Modal dialogs automatically capture D-Pad focus and isolate navigation from background windows.
-  - **Auto Launcher Cache Refresh:** Programmatically broadcasts `ACTION_PACKAGE_CHANGED` on version updates to force the TV launcher to refresh the app icon and banner without needing reinstallation.
 
 ---
 
@@ -45,10 +48,10 @@
 
 ---
 
-## 🎨 Branding & Icons
+## 🎨 Branding & Assets
 
-- **Android TV Launcher Banner (`android:banner`):** High-contrast 320×180 px landscape banner in Electric Cyan (`#00E5FF`), Emerald Green (`#10B981`), and Sky Blue (`#38BDF8`).
-- **App Launcher Icon (`android:icon`):** Adaptive Vector Drawable logo featuring the two-pane split file & folder emblem.
+- **Android TV Launcher Banner (`android:banner`):** Clean 16:9 landscape banner in `drawable-xhdpi/tv_banner.png` (`320×180 px`).
+- **App Launcher Icon (`android:icon`):** 1:1 Adaptive Icon with `72×72 dp` safe zone padding in `mipmap-xhdpi/ic_launcher.png` (`512×512 px`).
 
 ---
 
@@ -61,17 +64,17 @@ cd FileHandler-AndroidTV
 ```
 
 ### 2. Build Debug APK
-Open the project in Android Studio (2024.1+) and run:
+Open the project in Android Studio and run:
 ```bash
 ./gradlew assembleDebug
 ```
-The generated APK will be available at:
-`app/build/outputs/apk/debug/app-debug.apk`
+The generated APK will automatically be named with the version number:
+`app/build/outputs/apk/debug/FileHandler-v1.9.apk`
 
 ### 3. Deploy to Android TV Device or Emulator
 ```bash
 adb connect <YOUR_TV_IP_ADDRESS>
-adb install app/build/outputs/apk/debug/app-debug.apk
+adb install app/build/outputs/apk/debug/FileHandler-v1.9.apk
 ```
 
 ---

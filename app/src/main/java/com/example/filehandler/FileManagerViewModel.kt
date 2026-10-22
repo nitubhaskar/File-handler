@@ -3,6 +3,7 @@ package com.example.filehandler
 import android.app.Application
 import android.os.Build
 import android.os.Environment
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +13,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
+
+data class StorageSource(
+    val label: String,
+    val rootFile: File,
+    val isPrimary: Boolean,
+    val totalSpaceFormatted: String,
+    val freeSpaceFormatted: String
+)
 
 data class FileManagerUiState(
     val hasStoragePermission: Boolean = false,
@@ -25,6 +35,10 @@ data class FileManagerUiState(
     val showActionDialog: Boolean = false,
     val fileForAction: FileItem? = null,
     val filePendingDeletion: FileItem? = null,
+    // Storage Sources State
+    val storageSources: List<StorageSource> = emptyList(),
+    val activeSource: StorageSource? = null,
+    val showSourceDialog: Boolean = false,
     // Update Checker State
     val isCheckingUpdate: Boolean = false,
     val isDownloadingUpdate: Boolean = false,
@@ -49,6 +63,7 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
         val hasPermission = checkStoragePermission()
         _uiState.value = _uiState.value.copy(hasStoragePermission = hasPermission)
         if (hasPermission) {
+            detectStorageSources()
             loadDirectory(_uiState.value.currentDirectory)
         }
     }
@@ -59,6 +74,74 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
         } else {
             true
         }
+    }
+
+    fun detectStorageSources() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val sources = mutableListOf<StorageSource>()
+
+            // 1. Primary Internal Storage
+            val internalFile = Environment.getExternalStorageDirectory()
+            if (internalFile.exists()) {
+                sources.add(
+                    StorageSource(
+                        label = "Internal Storage",
+                        rootFile = internalFile,
+                        isPrimary = true,
+                        totalSpaceFormatted = formatBytes(internalFile.totalSpace),
+                        freeSpaceFormatted = formatBytes(internalFile.freeSpace)
+                    )
+                )
+            }
+
+            // 2. External Storage Volumes (SD Card, USB Flash Drive)
+            val externalDirs = ContextCompat.getExternalFilesDirs(getApplication(), null)
+            for (dir in externalDirs) {
+                if (dir != null) {
+                    val path = dir.absolutePath
+                    val androidIndex = path.indexOf("/Android/data/")
+                    if (androidIndex > 0) {
+                        val rootPath = path.substring(0, androidIndex)
+                        val rootFile = File(rootPath)
+                        if (rootFile.exists() && rootFile.path != internalFile.path) {
+                            val volumeLabel = if (rootFile.name.length > 4) "USB Drive (${rootFile.name})" else "SD Card (${rootFile.name})"
+                            sources.add(
+                                StorageSource(
+                                    label = volumeLabel,
+                                    rootFile = rootFile,
+                                    isPrimary = false,
+                                    totalSpaceFormatted = formatBytes(rootFile.totalSpace),
+                                    freeSpaceFormatted = formatBytes(rootFile.freeSpace)
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            val active = sources.find { _uiState.value.currentDirectory.absolutePath.startsWith(it.rootFile.absolutePath) } ?: sources.firstOrNull()
+            _uiState.value = _uiState.value.copy(
+                storageSources = sources,
+                activeSource = active
+            )
+        }
+    }
+
+    fun showSourceDialog() {
+        detectStorageSources()
+        _uiState.value = _uiState.value.copy(showSourceDialog = true)
+    }
+
+    fun dismissSourceDialog() {
+        _uiState.value = _uiState.value.copy(showSourceDialog = false)
+    }
+
+    fun selectStorageSource(source: StorageSource) {
+        _uiState.value = _uiState.value.copy(
+            showSourceDialog = false,
+            activeSource = source
+        )
+        navigateTo(source.rootFile)
     }
 
     fun navigateTo(directory: File) {
@@ -74,11 +157,13 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
     fun navigateUp() {
         val current = _uiState.value.currentDirectory
         val parent = current.parentFile
-        if (parent != null && current.path != Environment.getExternalStorageDirectory().path) {
+        val activeRoot = _uiState.value.activeSource?.rootFile ?: Environment.getExternalStorageDirectory()
+
+        if (parent != null && current.path != activeRoot.path) {
             loadDirectory(parent)
         } else {
             _uiState.value = _uiState.value.copy(
-                statusMessage = "Already at root directory"
+                statusMessage = "Already at root of ${uiState.value.activeSource?.label ?: "Storage"}"
             )
         }
     }
@@ -260,6 +345,19 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun clearStatusMessage() {
         _uiState.value = _uiState.value.copy(statusMessage = null)
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val kb = bytes / 1024.0
+        val mb = kb / 1024.0
+        val gb = mb / 1024.0
+        return when {
+            gb >= 1.0 -> String.format(Locale.US, "%.1f GB", gb)
+            mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+            kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+            else -> "$bytes B"
+        }
     }
 
     private fun deleteRecursively(file: File): Boolean {

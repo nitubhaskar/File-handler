@@ -57,6 +57,7 @@ class AppUpdateManager(private val context: Context) {
             connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Android TV; Mobile)")
 
             val contentType = connection.contentType ?: ""
+            val contentDisposition = connection.getHeaderField("Content-Disposition") ?: ""
             val currentCode = getCurrentVersionCode()
             val currentName = getCurrentVersionName()
 
@@ -67,7 +68,7 @@ class AppUpdateManager(private val context: Context) {
 
                 val json = JSONObject(responseText)
                 val latestCode = json.optInt("latestVersionCode", currentCode + 1)
-                val versionName = json.optString("versionName", "1.${latestCode}")
+                val versionName = json.optString("versionName", "v1.${latestCode}")
                 val apkUrl = json.optString("apkUrl", customUrl)
                 val notes = json.optString("releaseNotes", "New performance, feature, and UI updates available.")
 
@@ -85,18 +86,28 @@ class AppUpdateManager(private val context: Context) {
             } else {
                 // If the URL directly points to an APK file (or Google Drive binary link)
                 connection.disconnect()
-                val targetCode = currentCode + 1
-                val targetName = "v1.${targetCode}"
+
+                val fileName = extractFileNameFromHeader(contentDisposition)
+                val versionPair = parseVersionFromFileName(fileName)
+
+                val targetVersionName = versionPair?.second ?: "v1.${currentCode + 1}"
+                val isNewer = if (versionPair != null) {
+                    val currentMajorMinor = parseVersionFromFileName("v$currentName")
+                    val installedNum = currentMajorMinor?.first ?: currentCode
+                    versionPair.first > installedNum
+                } else {
+                    true
+                }
 
                 Result.success(
                     UpdateInfo(
                         currentVersionCode = currentCode,
                         currentVersionName = currentName,
-                        latestVersionCode = targetCode,
-                        versionName = targetName,
+                        latestVersionCode = versionPair?.first ?: (currentCode + 1),
+                        versionName = targetVersionName,
                         apkUrl = directUrl,
-                        releaseNotes = "New APK build uploaded on Google Drive.",
-                        isUpdateAvailable = true
+                        releaseNotes = if (fileName.isNotEmpty()) "New build: $fileName available on Google Drive." else "New APK build uploaded on Google Drive.",
+                        isUpdateAvailable = isNewer
                     )
                 )
             }
@@ -221,6 +232,28 @@ class AppUpdateManager(private val context: Context) {
         } catch (_: Exception) {
             false
         }
+    }
+
+    private fun extractFileNameFromHeader(header: String): String {
+        val regex = Regex("""(?i)filename\*?=(?:UTF-8'')?"?([^";]+)"?""")
+        val match = regex.find(header)
+        return match?.groupValues?.get(1)?.trim() ?: ""
+    }
+
+    private fun parseVersionFromFileName(fileName: String): Pair<Int, String>? {
+        if (fileName.isEmpty()) return null
+        val regex = Regex("""(?i)v?(\d+)\.(\d+)(?:\.(\d+))?""")
+        val match = regex.find(fileName)
+        if (match != null) {
+            val major = match.groupValues[1].toIntOrNull() ?: 1
+            val minor = match.groupValues[2].toIntOrNull() ?: 0
+            val patch = match.groupValues[3].toIntOrNull() ?: 0
+
+            val numericCode = major * 10 + minor
+            val nameString = "v$major.$minor" + (if (patch > 0) ".$patch" else "")
+            return Pair(numericCode, nameString)
+        }
+        return null
     }
 
     private fun convertToDirectDownloadUrl(url: String): String {

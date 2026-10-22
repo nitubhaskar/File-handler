@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.filehandler"
         minSdk = 30
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 9
+        versionName = "1.9"
     }
 
     buildTypes {
@@ -30,6 +30,16 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            if (output is com.android.build.api.variant.impl.VariantOutputImpl) {
+                output.outputFileName.set("FileHandler-v${android.defaultConfig.versionName}.apk")
+            }
+        }
     }
 }
 

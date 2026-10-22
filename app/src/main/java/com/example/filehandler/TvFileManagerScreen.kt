@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,9 +35,11 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Usb
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -79,18 +82,19 @@ fun TvFileManagerApp(viewModel: FileManagerViewModel) {
     var lastBackPressTime by remember { mutableStateOf(0L) }
 
     LaunchedEffect(Unit) {
-        delay(1500)
+        delay(1000)
         showOpeningScreen = false
     }
 
     // Smart Back Handler for Android TV Remote Control
     BackHandler {
         when {
+            uiState.showSourceDialog -> viewModel.dismissSourceDialog()
             uiState.showActionDialog -> viewModel.dismissFileActionDialog()
             uiState.showDeleteDialog -> viewModel.dismissDeleteDialog()
             uiState.showInfoDialog -> viewModel.dismissInfoDialog()
             uiState.showUpdateDialog -> viewModel.dismissUpdateDialog()
-            uiState.currentDirectory.path != Environment.getExternalStorageDirectory().path -> {
+            uiState.currentDirectory.path != (uiState.activeSource?.rootFile?.path ?: Environment.getExternalStorageDirectory().path) -> {
                 viewModel.navigateUp()
             }
             else -> {
@@ -144,7 +148,7 @@ fun TvFileManagerApp(viewModel: FileManagerViewModel) {
                     uiState = uiState,
                     onNavigateTo = { viewModel.navigateTo(it) },
                     onNavigateUp = { viewModel.navigateUp() },
-                    onRefresh = { viewModel.loadDirectory(uiState.currentDirectory) },
+                    onOpenSourceDialog = { viewModel.showSourceDialog() },
                     onCheckUpdates = { viewModel.checkForUpdates() },
                     onSelectFile = { viewModel.selectFile(it) },
                     onShowFileActionDialog = { viewModel.showFileActionDialog(it) },
@@ -154,6 +158,15 @@ fun TvFileManagerApp(viewModel: FileManagerViewModel) {
             }
 
             if (!showOpeningScreen) {
+                if (uiState.showSourceDialog) {
+                    StorageSourcePickerDialog(
+                        sources = uiState.storageSources,
+                        activeSource = uiState.activeSource,
+                        onSourceSelected = { viewModel.selectStorageSource(it) },
+                        onDismiss = { viewModel.dismissSourceDialog() }
+                    )
+                }
+
                 if (uiState.showActionDialog && uiState.fileForAction != null) {
                     FileActionOptionsDialog(
                         fileItem = uiState.fileForAction!!,
@@ -347,7 +360,7 @@ fun MainContent(
     uiState: FileManagerUiState,
     onNavigateTo: (java.io.File) -> Unit,
     onNavigateUp: () -> Unit,
-    onRefresh: () -> Unit,
+    onOpenSourceDialog: () -> Unit,
     onCheckUpdates: () -> Unit,
     onSelectFile: (FileItem) -> Unit,
     onShowFileActionDialog: (FileItem) -> Unit,
@@ -373,9 +386,10 @@ fun MainContent(
         // Header
         HeaderSection(
             currentPath = uiState.currentDirectory.absolutePath,
+            activeSourceLabel = uiState.activeSource?.label ?: "Storage Source",
             isCheckingUpdate = uiState.isCheckingUpdate,
             onNavigateUp = onNavigateUp,
-            onRefresh = onRefresh,
+            onOpenSourceDialog = onOpenSourceDialog,
             onCheckUpdates = onCheckUpdates
         )
 
@@ -409,7 +423,11 @@ fun MainContent(
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        itemsIndexed(uiState.fileList, key = { _, item -> item.path }) { index, item ->
+                        itemsIndexed(
+                            items = uiState.fileList,
+                            key = { _, item -> item.path },
+                            contentType = { _, _ -> "file_item" }
+                        ) { index, item ->
                             FileListItem(
                                 fileItem = item,
                                 isSelected = uiState.selectedFile?.path == item.path,
@@ -453,9 +471,10 @@ fun MainContent(
 @Composable
 fun HeaderSection(
     currentPath: String,
+    activeSourceLabel: String,
     isCheckingUpdate: Boolean,
     onNavigateUp: () -> Unit,
-    onRefresh: () -> Unit,
+    onOpenSourceDialog: () -> Unit,
     onCheckUpdates: () -> Unit
 ) {
     Row(
@@ -512,6 +531,28 @@ fun HeaderSection(
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Storage Source Switcher Button (SD Card / USB Drive Icon)
+            Button(
+                onClick = onOpenSourceDialog,
+                colors = ButtonDefaults.colors(
+                    containerColor = Color(0xFF282828),
+                    contentColor = Color(0xFFFFD54F),
+                    focusedContainerColor = Color(0xFF00E5FF),
+                    focusedContentColor = Color.Black
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SdCard,
+                    contentDescription = "Storage Source",
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = activeSourceLabel,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
             Button(
                 onClick = onCheckUpdates,
                 colors = ButtonDefaults.colors(
@@ -532,23 +573,143 @@ fun HeaderSection(
                     fontWeight = FontWeight.Bold
                 )
             }
+        }
+    }
+}
 
-            Button(
-                onClick = onRefresh,
-                colors = ButtonDefaults.colors(
-                    containerColor = Color(0xFF282828),
-                    contentColor = Color.White,
-                    focusedContainerColor = Color(0xFF00E5FF),
-                    focusedContentColor = Color.Black
-                )
+@Composable
+fun StorageSourcePickerDialog(
+    sources: List<StorageSource>,
+    activeSource: StorageSource?,
+    onSourceSelected: (StorageSource) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.85f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(520.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF222222))
+                    .border(2.dp, Color(0xFF00E5FF), RoundedCornerShape(16.dp))
+                    .padding(24.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Refresh",
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Refresh")
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SdCard,
+                            contentDescription = null,
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Select Storage Source",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (sources.isEmpty()) {
+                        Text(
+                            text = "No storage sources detected.",
+                            color = Color.Gray,
+                            fontSize = 14.sp
+                        )
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            itemsIndexed(sources, key = { _, src -> src.rootFile.absolutePath }) { index, source ->
+                                val isSelected = activeSource?.rootFile?.absolutePath == source.rootFile.absolutePath
+
+                                Card(
+                                    onClick = { onSourceSelected(source) },
+                                    modifier = if (index == 0) Modifier.fillMaxWidth().focusRequester(focusRequester) else Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.colors(
+                                        containerColor = if (isSelected) Color(0xFF333333) else Color(0xFF282828),
+                                        focusedContainerColor = Color(0xFF00E5FF),
+                                        focusedContentColor = Color.Black
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = if (source.isPrimary) Icons.Default.Storage else Icons.Default.Usb,
+                                            contentDescription = null,
+                                            tint = if (isSelected) Color(0xFFFFD54F) else Color.LightGray,
+                                            modifier = Modifier.size(32.dp)
+                                        )
+
+                                        Spacer(modifier = Modifier.width(16.dp))
+
+                                        Column(
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                text = source.label,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = "${source.freeSpaceFormatted} free of ${source.totalSpaceFormatted}",
+                                                fontSize = 12.sp,
+                                                color = Color.LightGray
+                                            )
+                                        }
+
+                                        if (isSelected) {
+                                            Text(
+                                                text = "ACTIVE",
+                                                color = Color(0xFF00E5FF),
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.colors(
+                            containerColor = Color(0xFF282828),
+                            contentColor = Color.White,
+                            focusedContainerColor = Color(0xFF00E5FF),
+                            focusedContentColor = Color.Black
+                        )
+                    ) {
+                        Text(text = "Close", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
     }
@@ -909,7 +1070,7 @@ fun UpdateAppDialog(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "New Version: ${updateInfo.versionName}",
+                        text = "Current: v${updateInfo.currentVersionName} (Code ${updateInfo.currentVersionCode})  ➔  New: ${updateInfo.versionName}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(0xFF00E5FF),
                         fontWeight = FontWeight.Bold
@@ -980,7 +1141,7 @@ fun UpdateAppDialog(
                             )
                         ) {
                             Text(
-                                text = if (isDownloading) "Downloading..." else "Install Update",
+                                text = if (isDownloading) "Downloading..." else "Download Update",
                                 fontWeight = FontWeight.Bold
                             )
                         }
