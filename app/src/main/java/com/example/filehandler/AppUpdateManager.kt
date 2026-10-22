@@ -8,11 +8,11 @@ import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.zip.ZipInputStream
 
 data class UpdateInfo(
     val currentVersionCode: Int,
@@ -49,68 +49,42 @@ class AppUpdateManager(private val context: Context) {
 
     suspend fun checkForUpdates(customUrl: String = defaultGoogleDriveUrl): Result<UpdateInfo> = withContext(Dispatchers.IO) {
         try {
-            val directUrl = convertToDirectDownloadUrl(customUrl)
-            val connection = URL(directUrl).openConnection() as HttpURLConnection
-            connection.connectTimeout = 10000
-            connection.readTimeout = 10000
-            connection.instanceFollowRedirects = true
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Android TV; Mobile)")
+            val fileId = extractFileIdFromUrl(customUrl)
+            var htmlRevisionName: String? = null
 
-            val contentType = connection.contentType ?: ""
-            val contentDisposition = connection.getHeaderField("Content-Disposition") ?: ""
+            // 1. Query Google Drive HTML page metadata for highest versioned APK title (e.g., FileHandler-v2.0.apk)
+            if (fileId != null) {
+                htmlRevisionName = fetchDriveFileRevisionTitle(fileId)
+            }
+
+            // 2. Query remote binary stream version directly from AndroidManifest.xml inside the APK stream
+            val directUrl = convertToDirectDownloadUrl(customUrl)
+            val binaryVersionName = fetchBinaryVersionFromApkStream(directUrl)
+
             val currentCode = getCurrentVersionCode()
             val currentName = getCurrentVersionName()
 
-            // If the URL serves JSON configuration
-            if (contentType.contains("json") || contentType.contains("text")) {
-                val responseText = connection.inputStream.bufferedReader().use { it.readText() }
-                connection.disconnect()
+            val htmlParsedVersion = htmlRevisionName?.let { parseVersionNameFromFileName(it) }
 
-                val json = JSONObject(responseText)
-                val latestCode = json.optInt("latestVersionCode", currentCode + 1)
-                val versionName = json.optString("versionName", "v1.${latestCode}")
-                val apkUrl = json.optString("apkUrl", customUrl)
-                val notes = json.optString("releaseNotes", "New performance, feature, and UI updates available.")
+            // Pick highest version string detected across HTML revision metadata and binary stream
+            val candidates = listOfNotNull(htmlParsedVersion, binaryVersionName)
+            val remoteVersionName = candidates.maxWithOrNull { a, b ->
+                if (isVersionNewer(a, b)) 1 else if (isVersionNewer(b, a)) -1 else 0
+            } ?: "1.${currentCode + 1}"
 
-                Result.success(
-                    UpdateInfo(
-                        currentVersionCode = currentCode,
-                        currentVersionName = currentName,
-                        latestVersionCode = latestCode,
-                        versionName = versionName,
-                        apkUrl = convertToDirectDownloadUrl(apkUrl),
-                        releaseNotes = notes,
-                        isUpdateAvailable = latestCode > currentCode
-                    )
+            val isNewer = isVersionNewer(currentName, remoteVersionName)
+
+            Result.success(
+                UpdateInfo(
+                    currentVersionCode = currentCode,
+                    currentVersionName = currentName,
+                    latestVersionCode = currentCode + 1,
+                    versionName = "v$remoteVersionName",
+                    apkUrl = directUrl,
+                    releaseNotes = "New build v$remoteVersionName available on Google Drive.",
+                    isUpdateAvailable = isNewer
                 )
-            } else {
-                // If the URL directly points to an APK file (or Google Drive binary link)
-                connection.disconnect()
-
-                val fileName = extractFileNameFromHeader(contentDisposition)
-                val versionPair = parseVersionFromFileName(fileName)
-
-                val targetVersionName = versionPair?.second ?: "v1.${currentCode + 1}"
-                val isNewer = if (versionPair != null) {
-                    val currentMajorMinor = parseVersionFromFileName("v$currentName")
-                    val installedNum = currentMajorMinor?.first ?: currentCode
-                    versionPair.first > installedNum
-                } else {
-                    true
-                }
-
-                Result.success(
-                    UpdateInfo(
-                        currentVersionCode = currentCode,
-                        currentVersionName = currentName,
-                        latestVersionCode = versionPair?.first ?: (currentCode + 1),
-                        versionName = targetVersionName,
-                        apkUrl = directUrl,
-                        releaseNotes = if (fileName.isNotEmpty()) "New build: $fileName available on Google Drive." else "New APK build uploaded on Google Drive.",
-                        isUpdateAvailable = isNewer
-                    )
-                )
-            }
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -234,34 +208,142 @@ class AppUpdateManager(private val context: Context) {
         }
     }
 
-    private fun extractFileNameFromHeader(header: String): String {
-        val regex = Regex("""(?i)filename\*?=(?:UTF-8'')?"?([^";]+)"?""")
-        val match = regex.find(header)
-        return match?.groupValues?.get(1)?.trim() ?: ""
+    private suspend fun fetchBinaryVersionFromApkStream(streamUrl: String): String? = withContext(Dispatchers.IO) {
+        try {
+            var currentUrl = streamUrl
+            var connection: HttpURLConnection
+            var redirects = 0
+
+            while (true) {
+                connection = URL(currentUrl).openConnection() as HttpURLConnection
+                connection.connectTimeout = 8000
+                connection.readTimeout = 8000
+                connection.instanceFollowRedirects = true
+                connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Android TV; Mobile)")
+
+                val status = connection.responseCode
+                if (status == HttpURLConnection.HTTP_MOVED_TEMP ||
+                    status == HttpURLConnection.HTTP_MOVED_PERM ||
+                    status == HttpURLConnection.HTTP_SEE_OTHER ||
+                    status == 307
+                ) {
+                    val redirectUrl = connection.getHeaderField("Location")
+                    connection.disconnect()
+                    if (redirectUrl != null && redirects < 5) {
+                        currentUrl = redirectUrl
+                        redirects++
+                        continue
+                    }
+                }
+                break
+            }
+
+            val inputStream = connection.inputStream
+            val zis = ZipInputStream(inputStream)
+            var entry = zis.nextEntry
+            var extractedVersion: String? = null
+
+            while (entry != null) {
+                if (entry.name == "AndroidManifest.xml") {
+                    val axmlBytes = zis.readBytes()
+                    extractedVersion = parseVersionNameFromAxml(axmlBytes)
+                    break
+                }
+                zis.closeEntry()
+                entry = zis.nextEntry
+            }
+
+            zis.close()
+            connection.disconnect()
+            extractedVersion
+        } catch (_: Exception) {
+            null
+        }
     }
 
-    private fun parseVersionFromFileName(fileName: String): Pair<Int, String>? {
-        if (fileName.isEmpty()) return null
-        val regex = Regex("""(?i)v?(\d+)\.(\d+)(?:\.(\d+))?""")
-        val match = regex.find(fileName)
-        if (match != null) {
-            val major = match.groupValues[1].toIntOrNull() ?: 1
-            val minor = match.groupValues[2].toIntOrNull() ?: 0
-            val patch = match.groupValues[3].toIntOrNull() ?: 0
+    private suspend fun fetchDriveFileRevisionTitle(fileId: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val viewUrl = "https://drive.google.com/file/d/$fileId/view"
+            val connection = URL(viewUrl).openConnection() as HttpURLConnection
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 
-            val numericCode = major * 10 + minor
-            val nameString = "v$major.$minor" + (if (patch > 0) ".$patch" else "")
-            return Pair(numericCode, nameString)
+            var foundName: String? = null
+            if (connection.responseCode == 200) {
+                val html = connection.inputStream.bufferedReader().use { it.readText() }
+                connection.disconnect()
+
+                val apkRegex = Regex("""(?i)([a-zA-Z0-9_-]*v?\d+\.\d+(?:\.\d+)?\.apk)""")
+                val matches = apkRegex.findAll(html).map { it.groupValues[1] }.toList()
+                if (matches.isNotEmpty()) {
+                    foundName = matches.maxWithOrNull { a, b ->
+                        val vA = parseVersionNameFromFileName(a) ?: ""
+                        val vB = parseVersionNameFromFileName(b) ?: ""
+                        if (isVersionNewer(vA, vB)) -1 else if (isVersionNewer(vB, vA)) 1 else 0
+                    }
+                }
+            } else {
+                connection.disconnect()
+            }
+            foundName
+        } catch (_: Exception) {
+            null
         }
-        return null
+    }
+
+    private fun parseVersionNameFromAxml(bytes: ByteArray): String? {
+        return try {
+            val content = String(bytes, Charsets.UTF_16LE)
+            val regex = Regex("""(?i)(\d+\.\d+(?:\.\d+)?)""")
+            val matches = regex.findAll(content).map { it.groupValues[1] }.toList()
+
+            val validCandidates = matches.filter { candidate ->
+                candidate != "1.0" && !candidate.startsWith("35.") && candidate != "35"
+            }
+
+            validCandidates.maxWithOrNull { a, b ->
+                if (isVersionNewer(a, b)) -1 else if (isVersionNewer(b, a)) 1 else 0
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseVersionNameFromFileName(fileName: String): String? {
+        if (fileName.isEmpty()) return null
+        val regex = Regex("""(?i)v?(\d+\.\d+(?:\.\d+)?)""")
+        val match = regex.find(fileName)
+        return match?.groupValues?.get(1)
+    }
+
+    private fun isVersionNewer(installedName: String, remoteName: String): Boolean {
+        return try {
+            val installedParts = installedName.replace(Regex("[^0-9.]"), "").split(".").mapNotNull { it.toIntOrNull() }
+            val remoteParts = remoteName.replace(Regex("[^0-9.]"), "").split(".").mapNotNull { it.toIntOrNull() }
+
+            val maxLen = maxOf(installedParts.size, remoteParts.size)
+            for (i in 0 until maxLen) {
+                val inst = installedParts.getOrElse(i) { 0 }
+                val rem = remoteParts.getOrElse(i) { 0 }
+                if (rem > inst) return true
+                if (rem < inst) return false
+            }
+            false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun extractFileIdFromUrl(url: String): String? {
+        val driveIdRegex = Regex("(?<=/d/|id=)([a-zA-Z0-9_-]{25,})")
+        return driveIdRegex.find(url)?.value
     }
 
     private fun convertToDirectDownloadUrl(url: String): String {
-        // Extract Google Drive File ID if present
-        val driveIdRegex = Regex("(?<=/d/|id=)([a-zA-Z0-9_-]{25,})")
-        val match = driveIdRegex.find(url)
-        return if (match != null) {
-            val fileId = match.value
+        val fileId = extractFileIdFromUrl(url)
+        return if (fileId != null) {
             "https://drive.usercontent.google.com/download?id=$fileId&confirm=t"
         } else {
             url

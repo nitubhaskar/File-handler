@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.filehandler"
         minSdk = 30
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.9"
+        versionCode = 13
+        versionName = "2.3"
     }
 
     buildTypes {
@@ -50,11 +50,16 @@ dependencies {
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
+    implementation("androidx.compose.material3:material3")
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material.icons)
 
     implementation(libs.androidx.tv.foundation)
     implementation(libs.androidx.tv.material)
+
+    // Jetpack Media3 ExoPlayer for TV Video & Audio Playback
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
